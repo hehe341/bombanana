@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Bombanana</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+                 background: #0b0d12; touch-action: none; -webkit-user-select: none; user-select: none;
+                 -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+    #unity-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #0b0d12; outline: none; }
+    #loader { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+              background: radial-gradient(circle at 50% 40%, #2a2112 0%, #0b0d12 70%); color: #fff;
+              font-family: -apple-system, system-ui, "Segoe UI", Roboto, Arial, sans-serif; transition: opacity .4s; }
+    #loader .logo { font-size: 44px; font-weight: 900; letter-spacing: 2px; color: #ffd33d;
+                    text-shadow: 0 4px 0 #8a5a00, 0 8px 24px rgba(0,0,0,.6); }
+    #loader .sub { margin-top: 6px; font-size: 13px; opacity: .6; letter-spacing: 3px; }
+    #loader .bar { margin-top: 28px; width: min(60vw, 360px); height: 10px; border-radius: 6px; background: rgba(255,255,255,.12); overflow: hidden; }
+    #loader .fill { width: 0%; height: 100%; border-radius: 6px; background: linear-gradient(90deg, #ffd33d, #ff8a1f); transition: width .15s; }
+    #loader .pct { margin-top: 10px; font-size: 13px; opacity: .7; }
+    #error { position: fixed; left: 0; right: 0; bottom: 20px; text-align: center; color: #ff6b6b;
+             font-family: system-ui, sans-serif; font-size: 14px; display: none; padding: 0 20px; }
+    @media (orientation: portrait) {
+      #rotate { display: flex; }
+    }
+    #rotate { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: #0b0d12;
+              color: #fff; font-family: system-ui, sans-serif; font-size: 18px; text-align: center; padding: 30px; z-index: 5; }
+    @media (orientation: landscape) { #rotate { display: none !important; } }
+  </style>
+</head>
+<body>
+  <canvas id="unity-canvas" tabindex="-1"></canvas>
+
+  <div id="loader">
+    <div class="logo">BOMBANANA</div>
+    <div class="sub">LOADING</div>
+    <div class="bar"><div class="fill" id="fill"></div></div>
+    <div class="pct" id="pct">0%</div>
+  </div>
+  <div id="rotate">🔄&nbsp; Turn your phone sideways to play</div>
+  <div id="error"></div>
+
+  <script>
+    // ---------------- messages from the Yoo app → game ----------------
+    // The app can either inject:  window.bombanana.send({...})
+    // or use WebView.postMessage (arrives as a 'message' event).
+    var pending = [];
+    window.unityInstance = null;
+
+    function toUnity(msg) {
+      if (typeof msg !== 'string') msg = JSON.stringify(msg);
+      if (window.unityInstance) window.unityInstance.SendMessage('YooBridge', 'OnHostMessage', msg);
+      else pending.push(msg);
+    }
+    window.bombanana = { send: toUnity };
+
+    function onHostEvent(e) {
+      if (!e || e.data == null) return;
+      var d = e.data;
+      if (typeof d === 'string' && d.charAt(0) !== '{') return;   // ignore non-JSON noise
+      toUnity(d);
+    }
+    window.addEventListener('message', onHostEvent);
+    document.addEventListener('message', onHostEvent);             // Android WebView
+
+    // ---------------- load the game ----------------
+    var canvas = document.querySelector('#unity-canvas');
+    var fill = document.querySelector('#fill');
+    var pct = document.querySelector('#pct');
+
+    function showError(text) {
+      var el = document.querySelector('#error');
+      el.textContent = text; el.style.display = 'block';
+      try {
+        if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: String(text) }));
+      } catch (e) {}
+    }
+
+    var config = {
+      dataUrl: "Build/web.data.unityweb",
+      frameworkUrl: "Build/web.framework.js.unityweb",
+      codeUrl: "Build/web.wasm.unityweb",
+      streamingAssetsUrl: "StreamingAssets",
+      companyName: "Yoo",
+      productName: "Bombanana",
+      productVersion: "1.0.0",
+      // Sharp enough on phones without rendering at full 3x retina cost.
+      devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+      showBanner: function (msg, type) { if (type === 'error') showError(msg); }
+    };
+
+    var script = document.createElement('script');
+    script.src = "Build/web.loader.js";
+    script.onload = function () {
+      createUnityInstance(canvas, config, function (p) {
+        var v = Math.round(p * 100);
+        fill.style.width = v + '%';
+        pct.textContent = v + '%';
+      }).then(function (instance) {
+        window.unityInstance = instance;
+        var loader = document.querySelector('#loader');
+        loader.style.opacity = '0';
+        setTimeout(function () { loader.style.display = 'none'; }, 450);
+        while (pending.length) instance.SendMessage('YooBridge', 'OnHostMessage', pending.shift());
+      }).catch(function (message) { showError(message); });
+    };
+    script.onerror = function () { showError('Could not load the game. Check your connection.'); };
+    document.body.appendChild(script);
+  </script>
+</body>
+</html>
